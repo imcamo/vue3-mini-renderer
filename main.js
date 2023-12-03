@@ -3,6 +3,10 @@
  */
 const vnode1 = {
   type: 'div',
+  props: {
+    class: 'div1',
+    id: 'vnode1',
+  },
   children: [
     {
       type: 'p',
@@ -20,6 +24,10 @@ const vnode1 = {
  */
 const vnode2 = {
   type: 'div',
+  props: {
+    class: 'div2',
+    id: 'vnode2',
+  },
   children: [
     {
       type: 'p',
@@ -44,6 +52,7 @@ function createRenderer(options) {
     insert,
     getParent,
     removeChild,
+    patchProps,
   } = options;
 
   /**
@@ -58,6 +67,14 @@ function createRenderer(options) {
       vnode.children.forEach(child => patch(null, child, el));
     }
 
+    // patch props
+    if (vnode.props) {
+      for (const key in vnode.props) {
+        patchProps(el, key, null, vnode.props[key]);
+      }
+    }
+
+    // 插入
     insert(el, container);
   }
 
@@ -134,6 +151,24 @@ const renderer = createRenderer({
   // 移除子元素
   removeChild(el, parent) {
     parent.removeChild(el);
+  },
+  patchProps(el, key, prevValue, nextValue) {
+    // 有限使用 HTML Attrs 设置初始值
+    if (key in el) {
+      const type = typeof el[key];
+      // 用户本意是禁用
+      // <button disabled></button> => { props: { disabled: '' }}
+      // vue 模板这样写是不禁用
+      // <button :disabled="false"></button> => { props: { disabled: false }}
+      // // 如果是布尔类型，并且 value 是空字符串，则将值矫正为 true
+      if (type === 'boolean' && nextValue === '') {
+        el[key] = true;
+      } else {
+        el[key] = nextValue;
+      }
+    } else {
+      el.setAttribute(key, nextValue);
+    }
   }
 });
 
