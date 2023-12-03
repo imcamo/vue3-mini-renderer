@@ -3,7 +3,33 @@
  */
 const vnode1 = {
   type: 'div',
-  children: 'hello world',
+  children: [
+    {
+      type: 'p',
+      children: 'hello1',
+    },
+    {
+      type: 'p',
+      children: 'hello2',
+    }
+  ]
+};
+
+/**
+ * 虚拟节点2
+ */
+const vnode2 = {
+  type: 'div',
+  children: [
+    {
+      type: 'p',
+      children: 'hello3',
+    },
+    {
+      type: 'p',
+      children: 'hello4',
+    }
+  ]
 };
 
 
@@ -21,22 +47,44 @@ function createRenderer(options) {
   } = options;
 
   /**
-   * 挂载元素 
+   * 挂载 vnode
    */
   function mountElement(vnode, container) {
     const el = vnode.el = createElement(vnode.type);
-    setElementText(el, vnode.children);
+    if (typeof vnode.children === 'string') {
+      setElementText(el, vnode.children);
+    } else if (Array.isArray(vnode.children)) {
+      // 如果children为数组，则 调用 patch 函数挂载到当前元素上
+      vnode.children.forEach(child => patch(null, child, el));
+    }
 
     insert(el, container);
   }
 
   /**
-   * 卸载操作 
+   * 卸载 vnode
    */
   function unmount(vnode) {
     let parent = getParent(vnode.el)
     if (parent) {
       removeChild(vnode.el, parent);
+    }
+  }
+
+  /**
+   * 更新 vnode 
+   * 负责元素挂载以及对比新旧 vnode
+   */
+  function patch(n1, n2, container) {
+    // 如果没有旧节点，直接挂载新节点，不需要对比
+    if (!n1) {
+      mountElement(n2, container);
+    } else {
+      // 如果存在旧节点，则需要针对新旧节点进行对比
+      // 简单实现对比算法,
+      // 1. 移除旧的节点， 2. 挂载新的节点
+      unmount(n1);
+      patch(null, n2, container);
     }
   }
 
@@ -47,7 +95,8 @@ function createRenderer(options) {
   function render(vnode, container) {
     // 当前存在 vnode,则执行挂载操作
     if (vnode) {
-      mountElement(vnode, container);
+      // 传入新旧 vnode 进行 patch 操作
+      patch(container._vnode, vnode, container);
     } else {
       // 当前没有 vnode，移除上一次的 vnode
       if (container._vnode) {
@@ -93,6 +142,13 @@ renderer.render(vnode1, document.querySelector('#app'));
 
 // 第二次渲染
 setTimeout(() => {
+  console.log('元素更新');
+  renderer.render(vnode2, document.querySelector('#app'));
+}, 3000);
+
+
+// 第三次次渲染
+setTimeout(() => {
   console.log('元素卸载');
   renderer.render(null, document.querySelector('#app'));
-}, 3000);
+}, 6000);
