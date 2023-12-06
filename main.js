@@ -1,3 +1,5 @@
+// @vue/reactivity
+const { effect, reactive, shallowReactive } = VueReactivity;
 // 文本节点
 const Text = Symbol('text');
 // 注释节点
@@ -88,25 +90,66 @@ const vnode4 = {
 
 /**
  * 虚拟节点5
+ * @example <myComponent title="This is Title props" />
  */
 const myComponent = {
   name: 'myComponent',
+  props: {
+    title: String,
+  },
   data() {
     return {
       msg: 'hello components',
     };
   },
-  render() {
+  render(state) {
     return {
       type: 'div',
-      children: this.msg,
+      children: `props：${this.title};data: ${this.msg}`,
     };
+  },
+
+  beforeCreate() {
+    console.log('call before create');
+  },
+
+  created() {
+    console.log('call created');
+  },
+
+  beforeMount() {
+    console.log('call before mount');
+  },
+
+  mounted(state) {
+    setTimeout(() => {
+      this.msg = 'updated';
+    }, 1000);
+    console.log('call mounted');;
+  },
+
+  beforeUpdate() {
+    console.log('call beforeUpdate');
+  },
+
+  updated() {
+    console.log('call updated');
+  }
+};
+const vnode5 = {
+  type: myComponent,
+  props: {
+    title: 'This is Title props',
   },
 };
 
-const vnode5 = {
+const vnode6 = {
   type: myComponent,
-}
+  props: {
+    title: 'Title props updated',
+  },
+};
+
 
 
 /**
@@ -161,20 +204,120 @@ function createRenderer(options) {
   }
 
   /**
+   * 解析 props
+   * 将父组件的 props 传值和子组件的 props 定义进行映射，解析出 props 和 attrs
+   */
+  function resolveProps(options, propsData) {
+    const props = {};
+    const attrs = {};
+    for (let key in propsData) {
+      // 定义在 options 里面认为是 props，否则认为是 attrs
+      if (key in options) {
+        props[key] = propsData[key];
+      } else {
+        attrs = propsData[key];
+      }
+    }
+
+    return [
+      props,
+      attrs,
+    ];
+  }
+
+  /**
    * 挂载组件 
    */
   function mountComponent(vnode, container, anchor) {
     // 组件选项数据
-    const options = vnode.type;
-    // 组件渲染函数
-    const { render, data } = options;
+    const componentOptions = vnode.type;
+    // 组件选项
+    const {
+      render,
+      data,
+      props: propsOpts,
+      beforeCreate,
+      created,
+      beforeMount,
+      mounted,
+      beforeUpdate,
+      updated
+    } = componentOptions;
+
+    // 调用 beforeCreate 钩子
+    beforeCreate && beforeCreate();
+
     // 组件状态
-    const state = data();
-    // 组件占位 vnode 
-    const subTree = render.call(state);
-    
-    // 挂载
-    patch(null, subTree, container, anchor);
+    // 转成响应式对象
+    const state = reactive(data());
+    // 解析 props
+    const [props, attrs] = resolveProps(propsOpts, vnode.props)
+
+    const instance = {
+      state,
+      // 将 props 转成响应式对象
+      props: shallowReactive(props),
+      // 组件是否挂载
+      isMounted: false,
+      // 占位 vnode
+      subTree: null,
+    };
+
+    vnode.component = instance;
+
+    const renderContext = new Proxy(instance, {
+      get(t, k, r) {
+        const { state, props } = t;
+        if (state && k in state) {
+          // 优先取 state 的值
+          return state[k];
+        } else if (k in props) {
+          // 否则取 props 的值
+          return props[k];
+        } else {
+          console.warn(`你在访问了一个未定义的值${k}`);
+        }
+      },
+      set(t, k, v, r) {
+        const { state, props } = t;
+        if (state && k in state) {
+          state[k] = vnode;
+        } else if (k in props) {
+          console.warn('props 不能改变');
+        } else {
+          console.warn(`你在访问了一个未定义的值${k}`);
+        }
+      }
+    })
+
+    created && created.call(renderContext);
+
+    // 使用副作用函数, state 状态变化的时候重新 patch
+    effect(() => {
+      // 组件占位 vnode
+      const subTree = render.call(renderContext);
+      if (!instance.isMounted) {
+        // 调用 beforeMount 钩子
+        beforeMount && beforeMount.call(state);
+        // 没有挂载直接 patch
+        patch(null, subTree, container, anchor);
+        // 调用 mounted 钩子
+        mounted && mounted.call(state);
+        instance.isMounted = true;
+      } else {
+        // 调用 beforeUpdate 钩子
+        beforeUpdate && beforeUpdate.call(state);
+        // 有挂载过需要对比
+        patch(instance.subTree, subTree, container, anchor);
+        // 调用 updated 钩子
+        updated && updated.call(state)
+      }
+      instance.subTree = subTree;
+      // 挂载
+    }, {
+      // 指定任务调度器
+      scheduler: queueJob
+    });
   }
 
   /**
@@ -244,6 +387,57 @@ function createRenderer(options) {
         patchComponent(n1, n2, container);
       }
     }
+  }
+
+  /**
+   * 组件 patch
+   */
+  function patchComponent(n1, n2, anchor) {
+    // 组件
+    const instance = n2.component = n1.component;
+    const { props } = instance;
+
+    // 是否有 props 更新
+    if (hasPropsChanged(n1.props, n2.props)) {
+      // 拿到新的 props
+      const [ nextProps ] = resolveProps(n2.type.props, n2.props)
+      // 更新 props
+      // 将 nextProps 更新到 props 上
+      for (let key in nextProps) {
+        // 修改 props 的值会被 effect 监听到
+        props[key] = nextProps[key];
+      }
+
+      // 删除 props
+      // 循环原有 props，没有在 nextprops 里面的需要删除 
+      for (let key in props) {
+        if (!(key in nextProps)) {
+          delete props[key];
+        }
+      }
+    }
+    // 次数应该还有 slots 等检测更新
+  }
+
+  /**
+   * 检测 props 是否更新
+   */
+  function hasPropsChanged(prevProps, nextProps) {
+    const nextKeys = Object.keys(nextProps);
+    // 长度不一样，认为更新了
+    if (nextKeys.length !== Object.keys(prevProps).length) {
+      return true;
+    }
+
+    // 值不一样认为更新了
+    for (let i = 0; i < nextKeys.length; i++) {
+      const key = nextKeys[i];
+      if (nextProps[key] !== prevProps[key]) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -433,7 +627,6 @@ function createRenderer(options) {
       }
     }
 
-
     if (oldEndIdx < oldStartdx && newStartIdx <= newEndIdx) {
       // 此时说明旧节点已经被遍历完了，但是新节点还有遍历完，需要新增新节点
       // @example
@@ -481,6 +674,22 @@ function createRenderer(options) {
   return {
     render,
   };
+}
+
+const queue = new Set();
+let isFlushing = false;
+const p = Promise.resolve();
+function queueJob(job) {
+  queue.add(job);
+  isFlushing = true;
+  p.then(() => {
+    try {
+      queue.forEach(job => job())
+    } finally {
+      isFlushing = false;
+      queue.clear = 0;
+    }
+  })
 }
 
 // 创建 Web 平台渲染器
@@ -543,12 +752,13 @@ const renderer = createRenderer({
 });
 
 // 首次渲染
-// renderer.render(vnode1, document.querySelector('#app'));
+renderer.render(vnode5, document.querySelector('#app'));
 
 // 第二次渲染
 setTimeout(() => {
   console.log('元素更新');
-  renderer.render(vnode5, document.querySelector('#app'));
+  debugger;
+  renderer.render(vnode6, document.querySelector('#app'));
 }, 3000);
 
 
