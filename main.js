@@ -78,10 +78,35 @@ const vnode3 = {
   type: Comment,
 };
 
+/**
+ * 虚拟节点4
+ */
 const vnode4 = {
   type: Text,
   children: 'text children',
 };
+
+/**
+ * 虚拟节点5
+ */
+const myComponent = {
+  name: 'myComponent',
+  data() {
+    return {
+      msg: 'hello components',
+    };
+  },
+  render() {
+    return {
+      type: 'div',
+      children: this.msg,
+    };
+  },
+};
+
+const vnode5 = {
+  type: myComponent,
+}
 
 
 /**
@@ -133,6 +158,23 @@ function createRenderer(options) {
     if (parent) {
       removeChild(vnode.el, parent);
     }
+  }
+
+  /**
+   * 挂载组件 
+   */
+  function mountComponent(vnode, container, anchor) {
+    // 组件选项数据
+    const options = vnode.type;
+    // 组件渲染函数
+    const { render, data } = options;
+    // 组件状态
+    const state = data();
+    // 组件占位 vnode 
+    const subTree = render.call(state);
+    
+    // 挂载
+    patch(null, subTree, container, anchor);
   }
 
   /**
@@ -192,8 +234,15 @@ function createRenderer(options) {
         // 如果存在的话，只需要更新碎片的 children 即可
         patchChildren(n1, n2, container);
       }
-    } else if (typeof text === 'object') {
+    } else if (typeof type === 'object') {
       // 如果新节点为组件
+      if (!n1) {
+        // 旧节点不存在，直接挂载当前新节点(组件)
+        mountComponent(n2, container);
+      } else {
+        // patch 当前组件
+        patchComponent(n1, n2, container);
+      }
     }
   }
 
@@ -384,7 +433,7 @@ function createRenderer(options) {
       }
     }
 
-  
+
     if (oldEndIdx < oldStartdx && newStartIdx <= newEndIdx) {
       // 此时说明旧节点已经被遍历完了，但是新节点还有遍历完，需要新增新节点
       // @example
@@ -494,12 +543,12 @@ const renderer = createRenderer({
 });
 
 // 首次渲染
-renderer.render(vnode1, document.querySelector('#app'));
+// renderer.render(vnode1, document.querySelector('#app'));
 
 // 第二次渲染
 setTimeout(() => {
   console.log('元素更新');
-  renderer.render(vnode2, document.querySelector('#app'));
+  renderer.render(vnode5, document.querySelector('#app'));
 }, 3000);
 
 
